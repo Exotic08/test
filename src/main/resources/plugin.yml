@@ -1,0 +1,16 @@
+name: NoRiptideCooldown
+version: ${project.version}
+main: dev.exotic08.noriptidecooldown.NoRiptideCooldownPlugin
+api-version: '1.20'
+author: Exotic08
+description: Shorten or remove the cooldown after using a Riptide trident.
+commands:
+  noriptidecooldown:
+    description: Manage NoRiptideCooldown.
+    usage: /<command> [status|reload|set <ticks>]
+    aliases: [nrc, riptidecd]
+    permission: noriptidecooldown.admin
+permissions:
+  noriptidecooldown.admin:
+    description: Allows using NoRiptideCooldown admin commands.
+    default: op

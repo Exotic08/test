@@ -1,0 +1,45 @@
+# NoRiptideCooldown
+# Plugin này chỉnh "hồi chiêu/cooldown" sau khi bay bằng Riptide,
+# KHÔNG chỉnh thời gian giữ chuột phải/charge để kích hoạt chiêu.
+
+# Số tick item cooldown còn lại sau khi dùng Riptide.
+# 0 = xóa hồi chiêu item hoàn toàn.
+# 1 giây = 20 ticks.
+cooldown-ticks: 0
+
+# Chỉ áp dụng khi item kích hoạt thật sự là đinh ba có phù phép Riptide.
+only-riptide-enchanted-tridents: true
+
+# Ghi đè item cooldown nhiều lần sau khi Riptide được kích hoạt.
+# Hữu ích nếu vanilla/plugin khác set cooldown muộn hơn event.
+# Với cooldown-ticks > 0, plugin sẽ tự trừ delay để không kéo dài cooldown thực tế.
+# Ví dụ cooldown-ticks: 10 và delay 5 => lúc đó chỉ set còn 5 tick.
+apply-delays-ticks:
+  - 0
+  - 1
+  - 2
+  - 5
+
+# Nếu server 1.20.5+ có item UseCooldownComponent/custom cooldown group,
+# plugin sẽ thử reset cooldown theo ItemStack trước, rồi reset theo Material.TRIDENT.
+# Giữ true để tương thích tốt hơn với item custom.
+try-itemstack-cooldown-api: true
+
+# Một số version/server không dùng item cooldown overlay cho Riptide,
+# mà dùng trạng thái auto-spin/riptiding làm khoảng khóa dùng lại.
+# -1 = không đụng tới spin/recast lock.
+# 0 = xóa/giảm khóa dùng lại càng sớm càng tốt.
+# Nếu bạn muốn giữ animation/damage xoay vanilla, đặt về -1.
+riptide-spin-duration-ticks: 0
+
+# Damage khi player đang ở trạng thái riptide spin đâm vào mob.
+# Không quan trọng nếu riptide-spin-duration-ticks là 0.
+riptide-spin-attack-strength: 8.0
+
+# Ghi đè spin/recast lock sau event. Nên để 1,2 tick để tránh bị vanilla ghi đè.
+riptide-spin-apply-delays-ticks:
+  - 1
+  - 2
+
+# In log debug mỗi lần reset cooldown/spin duration.
+debug: false
