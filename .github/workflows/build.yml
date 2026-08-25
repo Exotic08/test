@@ -1,0 +1,50 @@
+name: Build Plugin Jar
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - arena/01a03766-test
+    paths:
+      - pom.xml
+      - src/**
+      - .github/workflows/build.yml
+  pull_request:
+    paths:
+      - pom.xml
+      - src/**
+      - .github/workflows/build.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build NoRiptideCooldown
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Build plugin jar
+        run: mvn -B -ntp clean package
+
+      - name: List built jar
+        run: ls -lah target/*.jar
+
+      - name: Upload plugin jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: NoRiptideCooldown-jar
+          path: target/NoRiptideCooldown-*.jar
+          if-no-files-found: error
+          retention-days: 30
