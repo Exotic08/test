@@ -17,6 +17,10 @@ local CONFIG = {
 	SameServer = true,    -- ưu tiên vào lại đúng server cũ (JobId); sau vài lần fail sẽ vào server bất kỳ
 	SameServerTries = 2,  -- số lần thử server cũ trước khi chuyển sang server bất kỳ
 	Keybind = Enum.KeyCode.RightControl, -- phím ẩn/hiện menu
+	SaveFile = "AutoReconnect_data.json", -- file lưu số lần reconnect thành công (giữ qua các lần vào lại)
+	-- Link loadstring: dùng để tự chạy lại script sau khi vào lại game (qua queue_on_teleport).
+	-- Nếu bạn để script trong thư mục autoexec thì không cần, nhưng để cũng không sao.
+	ScriptURL = "https://raw.githubusercontent.com/Exotic08/test/refs/heads/main/auto_reconnect.lua",
 }
 
 ---------------------------------------------------------------------
@@ -50,6 +54,46 @@ local startTime = os.clock()
 local setStatus -- khai báo trước, gán sau khi tạo UI
 
 ---------------------------------------------------------------------
+-- LƯU DỮ LIỆU (giữ số lần thành công qua các lần vào lại game)
+---------------------------------------------------------------------
+local HttpService = game:GetService("HttpService")
+local canSave = typeof(writefile) == "function" and typeof(readfile) == "function"
+	and typeof(isfile) == "function"
+
+local data = { success = 0, last = 0, pending = false, pendingAt = 0 }
+
+local function loadData()
+	if not canSave then return end
+	pcall(function()
+		if isfile(CONFIG.SaveFile) then
+			local decoded = HttpService:JSONDecode(readfile(CONFIG.SaveFile))
+			if type(decoded) == "table" then
+				data.success = tonumber(decoded.success) or 0
+				data.last = tonumber(decoded.last) or 0
+				data.pending = decoded.pending == true
+				data.pendingAt = tonumber(decoded.pendingAt) or 0
+			end
+		end
+	end)
+end
+
+local function saveData()
+	if not canSave then return end
+	pcall(function()
+		writefile(CONFIG.SaveFile, HttpService:JSONEncode(data))
+	end)
+end
+
+local function queueSelf()
+	-- Đảm bảo script tự chạy lại sau khi teleport thành công
+	if typeof(queue_on_teleport) == "function" and CONFIG.ScriptURL ~= "" then
+		pcall(queue_on_teleport, 'loadstring(game:HttpGet("' .. CONFIG.ScriptURL .. '"))()')
+	end
+end
+
+loadData()
+
+---------------------------------------------------------------------
 -- GIAO DIỆN
 ---------------------------------------------------------------------
 local function getGuiParent()
@@ -71,7 +115,7 @@ gui.Parent = getGuiParent()
 
 local frame = Instance.new("Frame")
 frame.Name = "Main"
-frame.Size = UDim2.fromOffset(200, 74)
+frame.Size = UDim2.fromOffset(210, 100)
 frame.Position = UDim2.new(0, 12, 0, 12)
 frame.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
 frame.BorderSizePixel = 0
@@ -121,8 +165,40 @@ infoLabel.Font = Enum.Font.Gotham
 infoLabel.TextSize = 11
 infoLabel.TextXAlignment = Enum.TextXAlignment.Left
 infoLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
-infoLabel.Text = "00:00:00 • Rejoin: 0"
+infoLabel.Text = "00:00:00"
 infoLabel.Parent = frame
+
+local successLabel = Instance.new("TextLabel")
+successLabel.BackgroundTransparency = 1
+successLabel.Position = UDim2.fromOffset(10, 62)
+successLabel.Size = UDim2.new(1, -20, 0, 16)
+successLabel.Font = Enum.Font.GothamBold
+successLabel.TextSize = 12
+successLabel.TextXAlignment = Enum.TextXAlignment.Left
+successLabel.TextColor3 = Color3.fromRGB(235, 235, 245)
+successLabel.Text = "✔ Reconnect thành công: 0"
+successLabel.Parent = frame
+
+local lastLabel = Instance.new("TextLabel")
+lastLabel.BackgroundTransparency = 1
+lastLabel.Position = UDim2.fromOffset(10, 79)
+lastLabel.Size = UDim2.new(1, -20, 0, 16)
+lastLabel.Font = Enum.Font.Gotham
+lastLabel.TextSize = 11
+lastLabel.TextXAlignment = Enum.TextXAlignment.Left
+lastLabel.TextColor3 = Color3.fromRGB(150, 150, 170)
+lastLabel.Text = "Lần cuối: chưa có"
+lastLabel.Parent = frame
+
+local function refreshSuccess()
+	successLabel.Text = "✔ Reconnect thành công: " .. data.success
+	if data.last > 0 then
+		lastLabel.Text = "Lần cuối: " .. os.date("%H:%M:%S %d/%m", data.last)
+	else
+		lastLabel.Text = "Lần cuối: chưa có"
+	end
+end
+refreshSuccess()
 
 local toggle = Instance.new("TextButton")
 toggle.Size = UDim2.fromOffset(46, 20)
@@ -186,8 +262,8 @@ end)
 task.spawn(function()
 	while gui.Parent do
 		local t = math.floor(os.clock() - startTime)
-		infoLabel.Text = string.format("%02d:%02d:%02d • Rejoin: %d",
-			t // 3600, (t % 3600) // 60, t % 60, rejoinCount)
+		infoLabel.Text = string.format("Online: %02d:%02d:%02d",
+			t // 3600, (t % 3600) // 60, t % 60)
 		task.wait(1)
 	end
 end)
@@ -215,6 +291,13 @@ local function rejoin(reason)
 	if #shortReason > 28 then shortReason = shortReason:sub(1, 28) .. "…" end
 
 	setStatus("Mất kết nối: " .. shortReason, RED)
+
+	-- Đánh dấu "đang chờ vào lại": nếu script chạy lại ở game mới thì tính là thành công
+	data.pending = true
+	data.pendingAt = os.time()
+	saveData()
+	queueSelf()
+
 	task.wait(CONFIG.RejoinDelay)
 
 	local attempt = 0
@@ -290,7 +373,37 @@ toggle.MouseButton1Click:Connect(function()
 		toggle.Text = "TẮT"
 		toggle.BackgroundColor3 = RED
 		setStatus("Đã tắt", RED)
+		-- Người dùng chủ động tắt -> không tính lần vào lại tiếp theo là reconnect
+		data.pending = false
+		saveData()
 	end
 end)
 
-setStatus("Đang hoạt động", GREEN)
+---------------------------------------------------------------------
+-- KHỞI ĐỘNG: kiểm tra có phải vừa reconnect thành công không
+---------------------------------------------------------------------
+local PENDING_TIMEOUT = 600 -- quá 10 phút thì bỏ qua (vd: tắt game rồi mở lại sau)
+
+if data.pending and (os.time() - data.pendingAt) <= PENDING_TIMEOUT then
+	data.success += 1
+	data.last = os.time()
+	data.pending = false
+	saveData()
+	refreshSuccess()
+	setStatus("Reconnect thành công!", GREEN)
+	task.delay(6, function()
+		if enabled and not rejoining then
+			setStatus("Đang hoạt động", GREEN)
+		end
+	end)
+else
+	if data.pending then
+		data.pending = false
+		saveData()
+	end
+	setStatus("Đang hoạt động", GREEN)
+end
+
+if not canSave then
+	lastLabel.Text = "Executor không hỗ trợ lưu file"
+end
