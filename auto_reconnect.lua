@@ -60,7 +60,7 @@ local HttpService = game:GetService("HttpService")
 local canSave = typeof(writefile) == "function" and typeof(readfile) == "function"
 	and typeof(isfile) == "function"
 
-local data = { success = 0, last = 0, pending = false, pendingAt = 0 }
+local data = { success = 0, last = 0, pending = false, pendingAt = 0, webhook = "" }
 
 local function loadData()
 	if not canSave then return end
@@ -72,6 +72,7 @@ local function loadData()
 				data.last = tonumber(decoded.last) or 0
 				data.pending = decoded.pending == true
 				data.pendingAt = tonumber(decoded.pendingAt) or 0
+				data.webhook = type(decoded.webhook) == "string" and decoded.webhook or ""
 			end
 		end
 	end)
@@ -89,6 +90,74 @@ local function queueSelf()
 	if typeof(queue_on_teleport) == "function" and CONFIG.ScriptURL ~= "" then
 		pcall(queue_on_teleport, 'loadstring(game:HttpGet("' .. CONFIG.ScriptURL .. '"))()')
 	end
+end
+
+---------------------------------------------------------------------
+-- WEBHOOK DISCORD
+---------------------------------------------------------------------
+local httpRequest = (typeof(request) == "function" and request)
+	or (typeof(http_request) == "function" and http_request)
+	or (syn and syn.request)
+	or (fluxus and fluxus.request)
+
+local function isValidWebhook(url)
+	if type(url) ~= "string" then return false end
+	return url:match("^https://[%w%.]*discord%.com/api/webhooks/%d+/[%w_%-]+") ~= nil
+		or url:match("^https://[%w%.]*discordapp%.com/api/webhooks/%d+/[%w_%-]+") ~= nil
+end
+
+local gameName
+local function getGameName()
+	if gameName then return gameName end
+	local ok, info = pcall(function()
+		return game:GetService("MarketplaceService"):GetProductInfo(PLACE_ID)
+	end)
+	gameName = (ok and info and info.Name) or ("PlaceId " .. tostring(PLACE_ID))
+	return gameName
+end
+
+-- kind: "success" | "offline" | "test"
+local function sendWebhook(kind, extra)
+	local url = data.webhook
+	if not httpRequest or not isValidWebhook(url) then return end
+
+	task.spawn(function()
+		local online = kind ~= "offline"
+		local titles = {
+			success = "✅ Đã reconnect thành công",
+			offline = "⚠️ Mất kết nối",
+			test = "🔔 Webhook đã kết nối",
+		}
+		local fields = {
+			{ name = "Trạng thái", value = online and "🟢 Online" or "🔴 Offline", inline = true },
+			{ name = "Tài khoản", value = player.Name, inline = true },
+			{ name = "Game", value = getGameName(), inline = false },
+			{ name = "Reconnect thành công", value = tostring(data.success), inline = true },
+		}
+		if extra and extra ~= "" then
+			table.insert(fields, { name = "Chi tiết", value = tostring(extra), inline = false })
+		end
+
+		local ok, body = pcall(function()
+			return HttpService:JSONEncode({
+				username = "Auto Reconnect",
+				embeds = {{
+					title = titles[kind] or titles.test,
+					color = online and 3066993 or 15158332,
+					fields = fields,
+					timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+				}},
+			})
+		end)
+		if not ok then return end
+
+		pcall(httpRequest, {
+			Url = url,
+			Method = "POST",
+			Headers = { ["Content-Type"] = "application/json" },
+			Body = body,
+		})
+	end)
 end
 
 loadData()
@@ -115,7 +184,7 @@ gui.Parent = getGuiParent()
 
 local frame = Instance.new("Frame")
 frame.Name = "Main"
-frame.Size = UDim2.fromOffset(210, 100)
+frame.Size = UDim2.fromOffset(210, 132)
 frame.Position = UDim2.new(0, 12, 0, 12)
 frame.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
 frame.BorderSizePixel = 0
@@ -137,13 +206,28 @@ Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
 local title = Instance.new("TextLabel")
 title.BackgroundTransparency = 1
 title.Position = UDim2.fromOffset(26, 4)
-title.Size = UDim2.new(1, -34, 0, 22)
+title.Size = UDim2.new(1, -100, 0, 22)
 title.Font = Enum.Font.GothamBold
 title.TextSize = 13
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.TextColor3 = Color3.fromRGB(235, 235, 245)
 title.Text = "Auto Reconnect"
 title.Parent = frame
+
+local presenceLabel = Instance.new("TextLabel")
+presenceLabel.BackgroundTransparency = 1
+presenceLabel.Position = UDim2.new(1, -78, 0, 4)
+presenceLabel.Size = UDim2.fromOffset(70, 22)
+presenceLabel.Font = Enum.Font.GothamBold
+presenceLabel.TextSize = 12
+presenceLabel.TextXAlignment = Enum.TextXAlignment.Right
+presenceLabel.Parent = frame
+
+local function setPresence(online)
+	presenceLabel.Text = online and "● Online" or "● Offline"
+	presenceLabel.TextColor3 = online and Color3.fromRGB(70, 220, 110) or Color3.fromRGB(235, 80, 80)
+end
+setPresence(true)
 
 local statusLabel = Instance.new("TextLabel")
 statusLabel.BackgroundTransparency = 1
@@ -227,6 +311,72 @@ setStatus = function(text, color)
 	paint(color or GREEN)
 end
 
+-- Ô nhập webhook + nút Lưu
+local BLUE = Color3.fromRGB(88, 101, 242)
+
+local webhookBox = Instance.new("TextBox")
+webhookBox.Size = UDim2.new(1, -78, 0, 24)
+webhookBox.Position = UDim2.fromOffset(10, 100)
+webhookBox.BackgroundColor3 = Color3.fromRGB(36, 36, 46)
+webhookBox.BorderSizePixel = 0
+webhookBox.ClearTextOnFocus = false
+webhookBox.ClipsDescendants = true
+webhookBox.Font = Enum.Font.Gotham
+webhookBox.TextSize = 11
+webhookBox.TextXAlignment = Enum.TextXAlignment.Left
+webhookBox.TextColor3 = Color3.fromRGB(220, 220, 235)
+webhookBox.PlaceholderText = "Dán webhook Discord..."
+webhookBox.PlaceholderColor3 = Color3.fromRGB(110, 110, 130)
+webhookBox.Text = data.webhook
+webhookBox.Parent = frame
+Instance.new("UICorner", webhookBox).CornerRadius = UDim.new(0, 5)
+local boxPad = Instance.new("UIPadding", webhookBox)
+boxPad.PaddingLeft = UDim.new(0, 6)
+boxPad.PaddingRight = UDim.new(0, 6)
+
+local saveBtn = Instance.new("TextButton")
+saveBtn.Size = UDim2.fromOffset(58, 24)
+saveBtn.Position = UDim2.new(1, -68, 0, 100)
+saveBtn.BackgroundColor3 = BLUE
+saveBtn.BorderSizePixel = 0
+saveBtn.AutoButtonColor = false
+saveBtn.Font = Enum.Font.GothamBold
+saveBtn.TextSize = 11
+saveBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+saveBtn.Text = "Lưu"
+saveBtn.Parent = frame
+Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 5)
+
+local function flashSave(text, color)
+	saveBtn.Text = text
+	saveBtn.BackgroundColor3 = color
+	task.delay(1.5, function()
+		saveBtn.Text = "Lưu"
+		saveBtn.BackgroundColor3 = BLUE
+	end)
+end
+
+saveBtn.MouseButton1Click:Connect(function()
+	local url = (webhookBox.Text:gsub("%s+", ""))
+
+	if url == "" then
+		data.webhook = ""
+		saveData()
+		flashSave("Đã xoá", YELLOW)
+		return
+	end
+
+	if not isValidWebhook(url) then
+		flashSave("Sai link", RED)
+		return
+	end
+
+	data.webhook = url
+	saveData()
+	flashSave("Đã lưu", GREEN)
+	sendWebhook("test", "Webhook đã được lưu. Từ giờ mỗi lần reconnect sẽ có thông báo.")
+end)
+
 -- Kéo thả menu
 do
 	local dragging, dragStart, startPos
@@ -291,12 +441,14 @@ local function rejoin(reason)
 	if #shortReason > 28 then shortReason = shortReason:sub(1, 28) .. "…" end
 
 	setStatus("Mất kết nối: " .. shortReason, RED)
+	setPresence(false)
 
 	-- Đánh dấu "đang chờ vào lại": nếu script chạy lại ở game mới thì tính là thành công
 	data.pending = true
 	data.pendingAt = os.time()
 	saveData()
 	queueSelf()
+	sendWebhook("offline", tostring(reason or "Mất kết nối"))
 
 	task.wait(CONFIG.RejoinDelay)
 
@@ -391,6 +543,8 @@ if data.pending and (os.time() - data.pendingAt) <= PENDING_TIMEOUT then
 	saveData()
 	refreshSuccess()
 	setStatus("Reconnect thành công!", GREEN)
+	setPresence(true)
+	sendWebhook("success", "Đã vào lại game sau khi mất kết nối.")
 	task.delay(6, function()
 		if enabled and not rejoining then
 			setStatus("Đang hoạt động", GREEN)
