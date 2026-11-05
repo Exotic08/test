@@ -5,8 +5,41 @@
     - Gợi ý: để file này trong thư mục autoexec của executor để nó tự chạy lại sau mỗi lần vào game
 ]]
 
-if getgenv and getgenv().__AUTO_RECONNECT_LOADED then return end
-if getgenv then getgenv().__AUTO_RECONNECT_LOADED = true end
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- Có phải lần chạy này do chính script tự xếp hàng (Auto Execute) không?
+local fromQueue = false
+pcall(function()
+	if getgenv and getgenv().__AR_QUEUED then
+		fromQueue = true
+		getgenv().__AR_QUEUED = nil
+	end
+end)
+
+local function getGuiParent()
+	if typeof(gethui) == "function" then
+		local ok, ui = pcall(gethui)
+		if ok and ui then return ui end
+	end
+	local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+	if ok and cg then
+		local ok2 = pcall(function() return cg.Name end)
+		if ok2 then return cg end
+	end
+	return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- CHỐNG CHẠY TRÙNG: nếu menu đã tồn tại trong game này thì script đang chạy rồi -> tự ngắt.
+-- (Menu bị xoá mỗi khi sang game/server mới nên lần vào sau vẫn chạy được bình thường.)
+local guiParent = getGuiParent()
+if guiParent:FindFirstChild("AutoReconnectUI") then return end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "AutoReconnectUI"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+if typeof(syn) == "table" and syn.protect_gui then pcall(syn.protect_gui, gui) end
+gui.Parent = guiParent
 
 ---------------------------------------------------------------------
 -- CẤU HÌNH
@@ -60,7 +93,7 @@ local HttpService = game:GetService("HttpService")
 local canSave = typeof(writefile) == "function" and typeof(readfile) == "function"
 	and typeof(isfile) == "function"
 
-local data = { success = 0, last = 0, pending = false, pendingAt = 0, webhook = "" }
+local data = { success = 0, last = 0, pending = false, pendingAt = 0, webhook = "", autoExec = true }
 
 local function loadData()
 	if not canSave then return end
@@ -73,6 +106,7 @@ local function loadData()
 				data.pending = decoded.pending == true
 				data.pendingAt = tonumber(decoded.pendingAt) or 0
 				data.webhook = type(decoded.webhook) == "string" and decoded.webhook or ""
+				if decoded.autoExec ~= nil then data.autoExec = decoded.autoExec == true end
 			end
 		end
 	end)
@@ -85,10 +119,16 @@ local function saveData()
 	end)
 end
 
+local queued = false
 local function queueSelf()
-	-- Đảm bảo script tự chạy lại sau khi teleport thành công
+	-- Xếp hàng để script tự chạy lại sau lần teleport/vào lại game kế tiếp.
+	-- Chỉ xếp hàng 1 lần mỗi phiên để tránh chạy trùng.
+	if queued then return end
 	if typeof(queue_on_teleport) == "function" and CONFIG.ScriptURL ~= "" then
-		pcall(queue_on_teleport, 'loadstring(game:HttpGet("' .. CONFIG.ScriptURL .. '"))()')
+		local ok = pcall(queue_on_teleport,
+			'pcall(function() getgenv().__AR_QUEUED = true end) '
+			.. 'loadstring(game:HttpGet("' .. CONFIG.ScriptURL .. '"))()')
+		if ok then queued = true end
 	end
 end
 
@@ -162,29 +202,23 @@ end
 
 loadData()
 
+-- Nếu lần chạy này do hàng đợi tự xếp mà Auto Execute đã bị tắt (và không phải đang chờ
+-- xác nhận reconnect) thì tự ngắt, vòng lặp tự chạy dừng lại ở đây.
+do
+	local pendingValid = data.pending and (os.time() - data.pendingAt) <= 600
+	if fromQueue and not data.autoExec and not pendingValid then
+		gui:Destroy()
+		return
+	end
+end
+
 ---------------------------------------------------------------------
 -- GIAO DIỆN
 ---------------------------------------------------------------------
-local function getGuiParent()
-	if typeof(gethui) == "function" then
-		local ok, ui = pcall(gethui)
-		if ok and ui then return ui end
-	end
-	local ok = pcall(function() return CoreGui.Name end)
-	if ok then return CoreGui end
-	return player:WaitForChild("PlayerGui")
-end
-
-local gui = Instance.new("ScreenGui")
-gui.Name = "AutoReconnectUI"
-gui.ResetOnSpawn = false
-gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-if typeof(syn) == "table" and syn.protect_gui then pcall(syn.protect_gui, gui) end
-gui.Parent = getGuiParent()
-
+-- (gui đã được tạo ở đầu file để chống chạy trùng)
 local frame = Instance.new("Frame")
 frame.Name = "Main"
-frame.Size = UDim2.fromOffset(210, 132)
+frame.Size = UDim2.fromOffset(210, 162)
 frame.Position = UDim2.new(0, 12, 0, 12)
 frame.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
 frame.BorderSizePixel = 0
@@ -377,6 +411,44 @@ saveBtn.MouseButton1Click:Connect(function()
 	sendWebhook("test", "Webhook đã được lưu. Từ giờ mỗi lần reconnect sẽ có thông báo.")
 end)
 
+-- Auto Execute: tự chạy lại script ở lần vào game kế tiếp
+local autoLabel = Instance.new("TextLabel")
+autoLabel.BackgroundTransparency = 1
+autoLabel.Position = UDim2.fromOffset(10, 132)
+autoLabel.Size = UDim2.new(1, -76, 0, 22)
+autoLabel.Font = Enum.Font.Gotham
+autoLabel.TextSize = 12
+autoLabel.TextXAlignment = Enum.TextXAlignment.Left
+autoLabel.TextColor3 = Color3.fromRGB(200, 200, 215)
+autoLabel.Text = "Auto Execute"
+autoLabel.Parent = frame
+
+local autoBtn = Instance.new("TextButton")
+autoBtn.Size = UDim2.fromOffset(46, 20)
+autoBtn.Position = UDim2.new(1, -56, 0, 133)
+autoBtn.BorderSizePixel = 0
+autoBtn.AutoButtonColor = false
+autoBtn.Font = Enum.Font.GothamBold
+autoBtn.TextSize = 11
+autoBtn.TextColor3 = Color3.fromRGB(15, 15, 20)
+autoBtn.Parent = frame
+Instance.new("UICorner", autoBtn).CornerRadius = UDim.new(0, 5)
+
+local function refreshAutoBtn()
+	autoBtn.Text = data.autoExec and "BẬT" or "TẮT"
+	autoBtn.BackgroundColor3 = data.autoExec and GREEN or RED
+end
+refreshAutoBtn()
+
+autoBtn.MouseButton1Click:Connect(function()
+	data.autoExec = not data.autoExec
+	saveData()
+	refreshAutoBtn()
+	if data.autoExec then
+		queueSelf()
+	end
+end)
+
 -- Kéo thả menu
 do
 	local dragging, dragStart, startPos
@@ -560,4 +632,16 @@ end
 
 if not canSave then
 	lastLabel.Text = "Executor không hỗ trợ lưu file"
+elseif typeof(queue_on_teleport) ~= "function" then
+	lastLabel.Text = "Executor thiếu queue_on_teleport"
 end
+
+-- AUTO EXECUTE: xếp hàng ngay khi script chạy, và xếp lại mỗi lần teleport (nếu chưa xếp)
+if data.autoExec then
+	queueSelf()
+end
+player.OnTeleport:Connect(function()
+	if data.autoExec then
+		queueSelf()
+	end
+end)
