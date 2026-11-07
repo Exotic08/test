@@ -520,7 +520,6 @@ local function rejoin(reason)
 	data.pendingAt = os.time()
 	saveData()
 	queueSelf()
-	sendWebhook("offline", tostring(reason or "Mất kết nối"))
 
 	task.wait(CONFIG.RejoinDelay)
 
